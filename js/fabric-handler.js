@@ -75,6 +75,35 @@ const FabricHandler = (function() {
         // Bind events
         fabricCanvas.on('object:modified', handlePointDrag);
         fabricCanvas.on('object:moving', handlePointDrag);
+        
+        // Add debugging events
+        fabricCanvas.on('mouse:down', function(e) {
+            console.log('mouse:down', e.target ? `target index=${e.target.data?.index}` : 'no target');
+        });
+        
+        fabricCanvas.on('mouse:up', function(e) {
+            console.log('mouse:up', e.target ? `target index=${e.target.data?.index}` : 'no target');
+        });
+        
+        fabricCanvas.on('selection:created', function(e) {
+            console.log('selection:created', e.selected ? `selected ${e.selected.length} objects` : 'no selection');
+        });
+        
+        fabricCanvas.on('selection:cleared', function(e) {
+            console.log('selection:cleared', e.deselected ? `deselected ${e.deselected.length} objects` : 'no deselection');
+        });
+        
+        // Clear selection when clicking on canvas background
+        fabricCanvas.on('mouse:down', function(e) {
+            if (!e.target) {
+                console.log('Clicked on canvas background, clearing selection');
+                fabricCanvas.discardActiveObject();
+        fabricCanvas.renderAll();
+        
+        // Update visual state after resizing
+        updatePointsVisualState();
+    }
+        });
 
         console.log('FabricHandler initialized');
     }
@@ -93,7 +122,7 @@ const FabricHandler = (function() {
                 radius: POINT_RADIUS,
                 fill: pointColors[i],
                 stroke: '#ffffff',
-                strokeWidth: 2,
+                strokeWidth: 4, // Increased for better visibility
                 hasControls: false,
                 hasBorders: false,
                 lockRotation: true,
@@ -104,7 +133,14 @@ const FabricHandler = (function() {
                 hoverCursor: 'move',
                 selectable: true,
                 evented: true,
-                data: { index: i, label: ['TL', 'TR', 'BR', 'BL'][i] }
+                // Add transparent outer circle for larger hit area
+                transparentCorners: false,
+                cornerColor: 'rgba(0, 0, 0, 0.3)',
+                data: { 
+                    index: i, 
+                    label: ['TL', 'TR', 'BR', 'BL'][i],
+                    originalFill: pointColors[i] // Store original color
+                }
             });
             points.push(point);
             fabricCanvas.add(point);
@@ -162,7 +198,9 @@ const FabricHandler = (function() {
         const point = e.target;
         if (!point || !point.data) return;
         
-        console.log(`Handle point drag START: index=${point.data.index}, type=${e.type}, left=${point.left}, top=${point.top}`);
+        // Get event type from e or fallback
+        const eventType = e.type || 'unknown';
+        console.log(`Handle point drag START: index=${point.data.index}, type=${eventType}, left=${point.left}, top=${point.top}`);
 
         // Constrain point within canvas bounds
         const canvasWidth = fabricCanvas.width;
@@ -170,22 +208,31 @@ const FabricHandler = (function() {
         
         console.log(`Point drag: index=${point.data.index}, left=${point.left}, top=${point.top}, canvas=${canvasWidth}x${canvasHeight}`);
         
-        // Constrain point within canvas bounds
-        const newLeft = Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left));
-        const newTop = Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top));
+        // Constrain point within canvas bounds with some tolerance
+        // Use a larger margin for better usability
+        const margin = POINT_RADIUS * 1.5;
+        const newLeft = Math.max(margin, Math.min(canvasWidth - margin, point.left));
+        const newTop = Math.max(margin, Math.min(canvasHeight - margin, point.top));
         
-        console.log(`New position: left=${newLeft}, top=${newTop}`);
+        console.log(`New position: left=${newLeft}, top=${newTop} (margin=${margin})`);
         
-        point.set({
-            left: newLeft,
-            top: newTop
-        });
-
-        updateLines();
-        if (onPointsChanged) {
-            onPointsChanged(getPoints());
+        // Only update if position changed
+        if (Math.abs(point.left - newLeft) > 0.1 || Math.abs(point.top - newTop) > 0.1) {
+            point.set({
+                left: newLeft,
+                top: newTop
+            });
+            
+            updateLines();
+            if (onPointsChanged) {
+                onPointsChanged(getPoints());
+            }
         }
+        
         console.log(`Handle point drag END: index=${point.data.index}`);
+        
+        // Update visual state of all points (e.g., change color when near edge)
+        updatePointsVisualState();
     }
 
     /**
@@ -198,18 +245,24 @@ const FabricHandler = (function() {
 
         const canvasWidth = fabricCanvas.width;
         const canvasHeight = fabricCanvas.height;
+        
+        // Use same margin as in handlePointDrag
+        const margin = POINT_RADIUS * 1.5;
 
         coords.forEach((coord, i) => {
             const x = normalized ? coord.x * canvasWidth : coord.x;
             const y = normalized ? coord.y * canvasHeight : coord.y;
             points[i].set({
-                left: Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, x)),
-                top: Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, y))
+                left: Math.max(margin, Math.min(canvasWidth - margin, x)),
+                top: Math.max(margin, Math.min(canvasHeight - margin, y))
             });
         });
 
         updateLines();
         if (onPointsChanged) onPointsChanged(getPoints());
+        
+        // Update visual state
+        updatePointsVisualState();
         
         // Scroll to make points visible
         setTimeout(scrollViewToPoints, 100); // Delay to ensure rendering is complete
@@ -339,7 +392,7 @@ const FabricHandler = (function() {
             height = fabricCanvas.height;
         }
         console.log(`resetPoints: canvas=${width}x${height}`);
-        const margin = 0.3; // Increased from 0.1 to make points more visible
+        const margin = 0.2; // Reduced from 0.3 to give more space but still visible
         const coords = [
             { x: width * margin, y: height * margin },
             { x: width * (1 - margin), y: height * margin },
@@ -348,6 +401,36 @@ const FabricHandler = (function() {
         ];
         console.log('Reset points to:', coords);
         setPoints(coords);
+    }
+
+    /**
+     * Update visual state of points (e.g., change color when near edge)
+     */
+    function updatePointsVisualState() {
+        if (!fabricCanvas || !points.length) return;
+        
+        const canvasWidth = fabricCanvas.width;
+        const canvasHeight = fabricCanvas.height;
+        const edgeThreshold = POINT_RADIUS * 3; // Distance from edge to trigger visual change
+        
+        points.forEach(point => {
+            if (!point.data) return;
+            
+            const isNearLeftEdge = point.left < edgeThreshold;
+            const isNearRightEdge = point.left > canvasWidth - edgeThreshold;
+            const isNearTopEdge = point.top < edgeThreshold;
+            const isNearBottomEdge = point.top > canvasHeight - edgeThreshold;
+            const isNearEdge = isNearLeftEdge || isNearRightEdge || isNearTopEdge || isNearBottomEdge;
+            
+            // Change color when near edge
+            const newFill = isNearEdge ? '#ff9900' : point.data.originalFill; // Orange when near edge
+            
+            if (point.fill !== newFill) {
+                point.set({ fill: newFill });
+            }
+        });
+        
+        fabricCanvas.renderAll();
     }
 
     /**
