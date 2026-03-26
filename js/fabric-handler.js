@@ -68,12 +68,14 @@ const FabricHandler = (function() {
      */
     function createPoints() {
         points = [];
+        // Different colors for debugging
+        const pointColors = ['#ff0000', '#00ff00', '#0000ff', '#ff00ff']; // red, green, blue, magenta
         for (let i = 0; i < 4; i++) {
             const point = new fabric.Circle({
                 left: 100 + i * 50,
                 top: 100 + i * 30,
                 radius: POINT_RADIUS,
-                fill: POINT_COLOR,
+                fill: pointColors[i],
                 stroke: '#ffffff',
                 strokeWidth: 2,
                 hasControls: false,
@@ -85,11 +87,13 @@ const FabricHandler = (function() {
                 originY: 'center',
                 hoverCursor: 'move',
                 selectable: true,
-                data: { index: i }
+                evented: true,
+                data: { index: i, label: ['TL', 'TR', 'BR', 'BL'][i] }
             });
             points.push(point);
             fabricCanvas.add(point);
             point.bringToFront();
+            console.log(`Point ${i} (${point.data.label}) created at ${point.left},${point.top}`);
         }
         setPointsVisibility(false);
     }
@@ -141,6 +145,8 @@ const FabricHandler = (function() {
     function handlePointDrag(e) {
         const point = e.target;
         if (!point || !point.data) return;
+        
+        console.log(`Handle point drag START: index=${point.data.index}, type=${e.type}, left=${point.left}, top=${point.top}`);
 
         // Constrain point within canvas bounds
         const canvasWidth = fabricCanvas.width;
@@ -148,10 +154,13 @@ const FabricHandler = (function() {
         
         console.log(`Point drag: index=${point.data.index}, left=${point.left}, top=${point.top}, canvas=${canvasWidth}x${canvasHeight}`);
         
-        const newLeft = Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left));
-        const newTop = Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top));
+        // Temporary: disable constraints for debugging
+        // const newLeft = Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left));
+        // const newTop = Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top));
+        const newLeft = point.left;
+        const newTop = point.top;
         
-        console.log(`Constrained to: left=${newLeft}, top=${newTop}`);
+        console.log(`New position: left=${newLeft}, top=${newTop}`);
         
         point.set({
             left: newLeft,
@@ -162,6 +171,7 @@ const FabricHandler = (function() {
         if (onPointsChanged) {
             onPointsChanged(getPoints());
         }
+        console.log(`Handle point drag END: index=${point.data.index}`);
     }
 
     /**
@@ -311,13 +321,15 @@ const FabricHandler = (function() {
             width = fabricCanvas.width;
             height = fabricCanvas.height;
         }
-        const margin = 0.1;
+        console.log(`resetPoints: canvas=${width}x${height}`);
+        const margin = 0.3; // Increased from 0.1 to make points more visible
         const coords = [
             { x: width * margin, y: height * margin },
             { x: width * (1 - margin), y: height * margin },
             { x: width * (1 - margin), y: height * (1 - margin) },
             { x: width * margin, y: height * (1 - margin) }
         ];
+        console.log('Reset points to:', coords);
         setPoints(coords);
     }
 
