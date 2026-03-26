@@ -167,8 +167,8 @@
         // OpenCV.js loading
         const opencvLoading = document.getElementById('opencvLoading');
         const script = document.createElement('script');
-        // Use CDN for OpenCV.js (version 4.9.0)
-        script.src = 'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@latest/dist/opencv.js';
+        // Use local OpenCV.js file in lib/ directory
+        script.src = 'lib/opencv.js';
         script.async = true;
         script.onload = function() {
             opencvLoading.style.display = 'none';
