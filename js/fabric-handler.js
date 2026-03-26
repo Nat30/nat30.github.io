@@ -80,6 +80,7 @@ const FabricHandler = (function() {
             });
             points.push(point);
             fabricCanvas.add(point);
+            point.bringToFront();
         }
         setPointsVisibility(false);
     }
@@ -99,6 +100,7 @@ const FabricHandler = (function() {
             });
             lines.push(line);
             fabricCanvas.add(line);
+            line.sendToBack();
         }
     }
 

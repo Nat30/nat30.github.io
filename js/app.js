@@ -80,7 +80,7 @@ const App = (function() {
         // File upload
         if (dom.fileInput) {
             dom.fileInput.addEventListener('change', handleFileUpload);
-            dom.fileInput.addEventListener('input', handleFileUpload); // Also listen to input event
+            // dom.fileInput.addEventListener('input', handleFileUpload); // Removed to avoid duplicate calls
         }
         if (dom.uploadArea) {
             dom.uploadArea.addEventListener('click', () => {
@@ -172,17 +172,20 @@ const App = (function() {
             // Draw image onto Fabric canvas background (no scaling, use actual size)
             const fabricCanvas = FabricHandler.getCanvas();
             console.log('Fabric canvas:', fabricCanvas.width, 'x', fabricCanvas.height);
+            console.log('Image src length:', img.src.length, 'dimensions:', img.naturalWidth, 'x', img.naturalHeight);
             
             // Clear previous background if any
             fabricCanvas.setBackgroundImage(null, fabricCanvas.renderAll.bind(fabricCanvas));
             
             // Set new background image with actual dimensions
+            console.log('Setting background image...');
             fabricCanvas.setBackgroundImage(img.src, fabricCanvas.renderAll.bind(fabricCanvas), {
                 originX: 'left',
                 originY: 'top',
                 scaleX: 1,
                 scaleY: 1
             });
+            console.log('Background image set');
 
             // Reset points to default corners (using actual dimensions)
             FabricHandler.resetPoints(width, height);
