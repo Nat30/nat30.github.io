@@ -38,6 +38,8 @@ const FabricHandler = (function() {
             preserveObjectStacking: true
         });
 
+        console.log('Fabric canvas created:', fabricCanvas.width, 'x', fabricCanvas.height);
+        
         onPointsChanged = pointsCallback;
 
         // Create initial points (hidden until image is loaded)
@@ -306,7 +308,9 @@ const FabricHandler = (function() {
      */
     function setCanvasSize(width, height) {
         if (!fabricCanvas) return;
+        console.log('FabricHandler.setCanvasSize:', width, 'x', height);
         fabricCanvas.setDimensions({ width, height });
+        console.log('Canvas dimensions set to:', fabricCanvas.width, 'x', fabricCanvas.height);
         fabricCanvas.renderAll();
     }
 

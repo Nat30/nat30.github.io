@@ -12,7 +12,10 @@ const App = (function() {
         currentImage: null,
         currentPoints: null,
         currentMode: 'bw',
-        currentDPI: 300
+        currentDPI: 300,
+        imageScale: 1,
+        originalImageWidth: 0,
+        originalImageHeight: 0
     };
 
     // DOM Elements
@@ -144,35 +147,73 @@ const App = (function() {
             // Load image into Fabric canvas
             const img = await loadImageFile(file);
             state.currentImage = img;
+            console.log('Image loaded:', img.width, 'x', img.height);
 
-            // Set Fabric canvas size to image dimensions
+            // Get image dimensions
             const width = img.naturalWidth;
             const height = img.naturalHeight;
-            FabricHandler.setCanvasSize(width, height);
+            console.log('Image dimensions:', width, 'x', height);
+            
+            if (width === 0 || height === 0) {
+                throw new Error('Invalid image dimensions');
+            }
+            
+            // Get canvas container dimensions
+            const canvasWrapper = document.querySelector('.canvas-wrapper');
+            const containerWidth = canvasWrapper.clientWidth;
+            const containerHeight = canvasWrapper.clientHeight;
+            console.log('Container dimensions:', containerWidth, 'x', containerHeight);
+            
+            // Calculate scale to fit image in container while maintaining aspect ratio
+            const scaleX = containerWidth / width;
+            const scaleY = containerHeight / height;
+            const scale = Math.min(scaleX, scaleY); // Allow scaling up or down to fit container
+            
+            // Ensure scale is reasonable
+            const MIN_SCALE = 0.1;
+            const MAX_SCALE = 10;
+            const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+            
+            const scaledWidth = width * clampedScale;
+            const scaledHeight = height * clampedScale;
+            console.log('Scaled dimensions:', scaledWidth, 'x', scaledHeight, 'scale:', clampedScale);
+            
+            // Set Fabric canvas size to scaled dimensions
+            FabricHandler.setCanvasSize(scaledWidth, scaledHeight);
             FabricHandler.setPointsVisibility(true);
 
-            // Draw image onto Fabric canvas background
+            // Draw image onto Fabric canvas background with scaling
             const fabricCanvas = FabricHandler.getCanvas();
+            console.log('Fabric canvas:', fabricCanvas.width, 'x', fabricCanvas.height);
             fabricCanvas.setBackgroundImage(img.src, fabricCanvas.renderAll.bind(fabricCanvas), {
                 originX: 'left',
                 originY: 'top',
-                scaleX: 1,
-                scaleY: 1
+                scaleX: clampedScale,
+                scaleY: clampedScale
             });
 
-            // Reset points to default corners
-            FabricHandler.resetPoints(width, height);
+            // Reset points to default corners (using scaled dimensions)
+            FabricHandler.resetPoints(scaledWidth, scaledHeight);
 
             // Update state
             state.imageLoaded = true;
+            // Store scaling factor for coordinate conversion
+            state.imageScale = clampedScale;
+            state.originalImageWidth = width;
+            state.originalImageHeight = height;
             state.currentPoints = FabricHandler.getPoints(true); // normalized
             setStatus('Image loaded. Adjust corner points or click Auto‑detect.');
             updateCoordinates();
+            
+            // Force render
+            fabricCanvas.renderAll();
         } catch (error) {
             setStatus('Failed to load image: ' + error.message, true);
             console.error(error);
         } finally {
             updateUI();
+            // Reset file input to allow selecting same file again
+            e.target.value = '';
         }
     }
 
@@ -205,7 +246,17 @@ const App = (function() {
 
         try {
             const normalizedPoints = await FabricHandler.autoDetectCorners(state.currentImage);
-            FabricHandler.setPoints(normalizedPoints, true);
+            console.log('Auto-detected points (original normalized):', normalizedPoints);
+            
+            // Convert normalized points from original image to scaled canvas
+            const scale = state.imageScale;
+            const canvasNormalizedPoints = normalizedPoints.map(p => ({
+                x: p.x / scale,
+                y: p.y / scale
+            }));
+            console.log('Auto-detected points (canvas normalized):', canvasNormalizedPoints);
+            
+            FabricHandler.setPoints(canvasNormalizedPoints, true);
             setStatus('Corners detected. Adjust if needed.');
         } catch (error) {
             setStatus('Auto‑detection failed: ' + error.message, true);
@@ -221,8 +272,9 @@ const App = (function() {
      */
     function handleResetPoints() {
         if (!state.currentImage) return;
-        const width = state.currentImage.naturalWidth;
-        const height = state.currentImage.naturalHeight;
+        // Use scaled dimensions for resetting points
+        const width = state.originalImageWidth * state.imageScale;
+        const height = state.originalImageHeight * state.imageScale;
         FabricHandler.resetPoints(width, height);
         setStatus('Points reset to default corners.');
     }
@@ -244,6 +296,23 @@ const App = (function() {
         const text = `Points: (${Math.round(pts[0].x)},${Math.round(pts[0].y)}) ... (${Math.round(pts[2].x)},${Math.round(pts[2].y)})`;
         dom.coordinates.textContent = text;
     }
+    
+    /**
+     * Convert canvas coordinates back to original image coordinates
+     * @param {Array} canvasPoints - Points in canvas coordinates
+     * @returns {Array} Points in original image coordinates
+     */
+    function canvasToOriginalImage(canvasPoints) {
+        if (!state.imageScale || state.imageScale === 1) {
+            return canvasPoints;
+        }
+        
+        const scale = state.imageScale;
+        return canvasPoints.map(p => ({
+            x: p.x / scale,
+            y: p.y / scale
+        }));
+    }
 
     /**
      * Handle image processing
@@ -259,10 +328,14 @@ const App = (function() {
             // Convert image to OpenCV Mat
             const mat = await CVEngine.loadImage(state.currentImage);
 
+            // Convert canvas coordinates to original image coordinates
+            const originalImagePoints = canvasToOriginalImage(state.currentPoints);
+            console.log('Processing with points:', state.currentPoints, '->', originalImagePoints);
+
             // Process with current points and mode
             const processedMat = CVEngine.processImage(
                 mat,
-                state.currentPoints,
+                originalImagePoints,
                 state.currentMode
             );
 
