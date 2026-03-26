@@ -9,6 +9,8 @@ const FabricHandler = (function() {
     // Points and lines
     let points = [];
     let lines = [];
+    // Outer wrapper for scrolling
+    let outerWrapper = null;
     // Configuration
     const POINT_RADIUS = 10;
     const POINT_COLOR = '#3b82f6';
@@ -48,6 +50,20 @@ const FabricHandler = (function() {
             wrapper.style.height = '100%';
             wrapper.style.position = 'relative';
             console.log('Wrapper element initialized');
+        }
+        
+        // Get the outer wrapper (.canvas-wrapper) for scrolling
+        const canvasElement = fabricCanvas.lowerCanvasEl || canvasEl;
+        outerWrapper = null;
+        if (canvasElement && canvasElement.parentNode && canvasElement.parentNode.parentNode) {
+            outerWrapper = canvasElement.parentNode.parentNode;
+            if (outerWrapper.classList.contains('canvas-wrapper')) {
+                console.log('Found outer canvas-wrapper for scrolling');
+            } else {
+                // Try to find .canvas-wrapper by traversing up
+                outerWrapper = canvasElement.closest('.canvas-wrapper');
+                console.log('Found outer wrapper via closest:', outerWrapper);
+            }
         }
         
         onPointsChanged = pointsCallback;
@@ -154,11 +170,9 @@ const FabricHandler = (function() {
         
         console.log(`Point drag: index=${point.data.index}, left=${point.left}, top=${point.top}, canvas=${canvasWidth}x${canvasHeight}`);
         
-        // Temporary: disable constraints for debugging
-        // const newLeft = Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left));
-        // const newTop = Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top));
-        const newLeft = point.left;
-        const newTop = point.top;
+        // Constrain point within canvas bounds
+        const newLeft = Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left));
+        const newTop = Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top));
         
         console.log(`New position: left=${newLeft}, top=${newTop}`);
         
@@ -196,6 +210,9 @@ const FabricHandler = (function() {
 
         updateLines();
         if (onPointsChanged) onPointsChanged(getPoints());
+        
+        // Scroll to make points visible
+        setTimeout(scrollViewToPoints, 100); // Delay to ensure rendering is complete
     }
 
     /**
@@ -357,6 +374,40 @@ const FabricHandler = (function() {
         }
         
         fabricCanvas.renderAll();
+    }
+
+    /**
+     * Scroll the outer wrapper to make points visible
+     */
+    function scrollViewToPoints() {
+        if (!outerWrapper || !points.length) return;
+        
+        // Calculate bounding box of all points
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        points.forEach(point => {
+            const left = point.left || 0;
+            const top = point.top || 0;
+            minX = Math.min(minX, left - POINT_RADIUS);
+            minY = Math.min(minY, top - POINT_RADIUS);
+            maxX = Math.max(maxX, left + POINT_RADIUS);
+            maxY = Math.max(maxY, top + POINT_RADIUS);
+        });
+        
+        // Calculate center of points
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        
+        // Calculate scroll position to center the points
+        const wrapperWidth = outerWrapper.clientWidth;
+        const wrapperHeight = outerWrapper.clientHeight;
+        
+        const scrollLeft = Math.max(0, centerX - wrapperWidth / 2);
+        const scrollTop = Math.max(0, centerY - wrapperHeight / 2);
+        
+        console.log(`Scrolling to points: center(${centerX},${centerY}), wrapper(${wrapperWidth}x${wrapperHeight}), scroll(${scrollLeft},${scrollTop})`);
+        
+        outerWrapper.scrollLeft = scrollLeft;
+        outerWrapper.scrollTop = scrollTop;
     }
 
     /**
