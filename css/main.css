@@ -299,7 +299,7 @@ body {
 }
 
 /* Canvas Containers */
-.canvas-container {
+.canvas-area > .canvas-container {
     background: var(--card-bg);
     border-radius: var(--radius);
     overflow: hidden;
@@ -309,6 +309,21 @@ body {
     flex: 1;
     width: 100%;
     height: 100%;
+}
+
+/* Fabric.js wrapper container */
+.canvas-wrapper > .canvas-container,
+.canvas-wrapper > .canvas-container > .canvas-container {
+    width: 100% !important;
+    height: 100% !important;
+    position: relative;
+}
+
+/* Ensure Fabric.js canvases fill their containers */
+.canvas-wrapper canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
 }
 
 .canvas-header {
@@ -338,6 +353,7 @@ body {
     position: relative;
     background: #f8fafc;
     min-height: 400px;
+    width: 100%;
     overflow: auto; /* Allow scrolling if canvas is larger than container */
 }
 

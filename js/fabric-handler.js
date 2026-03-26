@@ -41,6 +41,15 @@ const FabricHandler = (function() {
 
         console.log('Fabric canvas created:', fabricCanvas.width, 'x', fabricCanvas.height);
         
+        // Set initial wrapper styles
+        const wrapper = fabricCanvas.wrapperEl;
+        if (wrapper) {
+            wrapper.style.width = '100%';
+            wrapper.style.height = '100%';
+            wrapper.style.position = 'relative';
+            console.log('Wrapper element initialized');
+        }
+        
         onPointsChanged = pointsCallback;
 
         // Create initial points (hidden until image is loaded)
@@ -320,8 +329,21 @@ const FabricHandler = (function() {
     function setCanvasSize(width, height) {
         if (!fabricCanvas) return;
         console.log('FabricHandler.setCanvasSize:', width, 'x', height);
+        // Set canvas dimensions
         fabricCanvas.setDimensions({ width, height });
         console.log('Canvas dimensions set to:', fabricCanvas.width, 'x', fabricCanvas.height);
+        
+        // Also set wrapper container dimensions
+        const wrapper = fabricCanvas.wrapperEl;
+        if (wrapper) {
+            wrapper.style.width = '100%';
+            wrapper.style.height = '100%';
+            wrapper.style.position = 'relative';
+            console.log('Wrapper element found and styled');
+        } else {
+            console.warn('No wrapper element found');
+        }
+        
         fabricCanvas.renderAll();
     }
 
