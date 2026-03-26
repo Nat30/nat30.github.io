@@ -78,8 +78,15 @@ const App = (function() {
      */
     function bindEvents() {
         // File upload
-        dom.fileInput.addEventListener('change', handleFileUpload);
-        dom.uploadArea.addEventListener('click', () => dom.fileInput.click());
+        if (dom.fileInput) {
+            dom.fileInput.addEventListener('change', handleFileUpload);
+            dom.fileInput.addEventListener('input', handleFileUpload); // Also listen to input event
+        }
+        if (dom.uploadArea) {
+            dom.uploadArea.addEventListener('click', () => {
+                if (dom.fileInput) dom.fileInput.click();
+            });
+        }
 
         // Control buttons
         dom.btnAutoDetect.addEventListener('click', handleAutoDetect);

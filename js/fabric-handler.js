@@ -35,7 +35,8 @@ const FabricHandler = (function() {
         fabricCanvas = new fabric.Canvas(canvasEl, {
             selection: false,
             backgroundColor: 'transparent',
-            preserveObjectStacking: true
+            preserveObjectStacking: true,
+            perPixelTargetFind: true // Better object picking
         });
 
         console.log('Fabric canvas created:', fabricCanvas.width, 'x', fabricCanvas.height);
@@ -133,9 +134,17 @@ const FabricHandler = (function() {
         // Constrain point within canvas bounds
         const canvasWidth = fabricCanvas.width;
         const canvasHeight = fabricCanvas.height;
+        
+        console.log(`Point drag: index=${point.data.index}, left=${point.left}, top=${point.top}, canvas=${canvasWidth}x${canvasHeight}`);
+        
+        const newLeft = Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left));
+        const newTop = Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top));
+        
+        console.log(`Constrained to: left=${newLeft}, top=${newTop}`);
+        
         point.set({
-            left: Math.max(POINT_RADIUS, Math.min(canvasWidth - POINT_RADIUS, point.left)),
-            top: Math.max(POINT_RADIUS, Math.min(canvasHeight - POINT_RADIUS, point.top))
+            left: newLeft,
+            top: newTop
         });
 
         updateLines();
