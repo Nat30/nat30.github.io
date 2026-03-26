@@ -12,7 +12,7 @@ const FabricHandler = (function() {
     // Outer wrapper for scrolling
     let outerWrapper = null;
     // Configuration
-    const POINT_RADIUS = 10;
+    const POINT_RADIUS = 15; // Increased from 10 for better touch target
     const POINT_COLOR = '#3b82f6';
     const LINE_COLOR = '#3b82f6';
     const LINE_WIDTH = 2;
