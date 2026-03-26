@@ -31,8 +31,8 @@ const App = (function() {
             lucide.createIcons();
         }
 
-        // Check OpenCV readiness
-        if (CVEngine.isReady()) {
+        // Initialize OpenCV engine
+        if (CVEngine.init()) {
             state.opencvReady = true;
             console.log('App initialized with OpenCV ready');
         } else {
