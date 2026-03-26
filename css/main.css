@@ -336,14 +336,14 @@ body {
     position: relative;
     background: #f8fafc;
     min-height: 400px;
+    overflow: auto; /* Allow scrolling if canvas is larger than container */
 }
 
 canvas {
     display: block;
     max-width: 100%;
     max-height: 100%;
-    width: 100%;
-    height: 100%;
+    /* Remove width: 100%; height: 100%; to prevent CSS scaling interference */
     object-fit: contain;
 }
 
@@ -351,8 +351,8 @@ canvas {
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
+    /* Let Fabric.js control the canvas dimensions, not CSS */
+    /* width: 100%; height: 100%; removed */
 }
 
 .canvas-footer {

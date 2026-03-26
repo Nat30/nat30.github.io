@@ -158,47 +158,32 @@ const App = (function() {
                 throw new Error('Invalid image dimensions');
             }
             
-            // Get canvas container dimensions
-            const canvasWrapper = document.querySelector('.canvas-wrapper');
-            const containerWidth = canvasWrapper.clientWidth;
-            const containerHeight = canvasWrapper.clientHeight;
-            console.log('Container dimensions:', containerWidth, 'x', containerHeight);
-            
-            // Calculate scale to fit image in container while maintaining aspect ratio
-            const scaleX = containerWidth / width;
-            const scaleY = containerHeight / height;
-            const scale = Math.min(scaleX, scaleY); // Allow scaling up or down to fit container
-            
-            // Ensure scale is reasonable
-            const MIN_SCALE = 0.1;
-            const MAX_SCALE = 10;
-            const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
-            
-            const scaledWidth = width * clampedScale;
-            const scaledHeight = height * clampedScale;
-            console.log('Scaled dimensions:', scaledWidth, 'x', scaledHeight, 'scale:', clampedScale);
-            
-            // Set Fabric canvas size to scaled dimensions
-            FabricHandler.setCanvasSize(scaledWidth, scaledHeight);
+            // Set Fabric canvas size to actual image dimensions
+            FabricHandler.setCanvasSize(width, height);
             FabricHandler.setPointsVisibility(true);
 
-            // Draw image onto Fabric canvas background with scaling
+            // Draw image onto Fabric canvas background (no scaling, use actual size)
             const fabricCanvas = FabricHandler.getCanvas();
             console.log('Fabric canvas:', fabricCanvas.width, 'x', fabricCanvas.height);
+            
+            // Clear previous background if any
+            fabricCanvas.setBackgroundImage(null, fabricCanvas.renderAll.bind(fabricCanvas));
+            
+            // Set new background image with actual dimensions
             fabricCanvas.setBackgroundImage(img.src, fabricCanvas.renderAll.bind(fabricCanvas), {
                 originX: 'left',
                 originY: 'top',
-                scaleX: clampedScale,
-                scaleY: clampedScale
+                scaleX: 1,
+                scaleY: 1
             });
 
-            // Reset points to default corners (using scaled dimensions)
-            FabricHandler.resetPoints(scaledWidth, scaledHeight);
+            // Reset points to default corners (using actual dimensions)
+            FabricHandler.resetPoints(width, height);
 
             // Update state
             state.imageLoaded = true;
-            // Store scaling factor for coordinate conversion
-            state.imageScale = clampedScale;
+            // Store scaling factor for coordinate conversion (no scaling now)
+            state.imageScale = 1;
             state.originalImageWidth = width;
             state.originalImageHeight = height;
             state.currentPoints = FabricHandler.getPoints(true); // normalized
