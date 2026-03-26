@@ -304,7 +304,4 @@ const CVEngine = (function() {
     };
 })();
 
-// Auto‑initialize when OpenCV is loaded
-if (typeof cv !== 'undefined') {
-    CVEngine.init();
-}
+// No auto‑initialization; init() must be called explicitly after OpenCV loads
