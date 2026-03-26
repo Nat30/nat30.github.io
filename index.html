@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DocScanner - Web Document Scanning & Perspective Correction</title>
+    <link rel="stylesheet" href="css/main.css">
+    <!-- Lucide Icons CDN -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <!-- Fabric.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+    <!-- jsPDF CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- OpenCV.js will be loaded asynchronously -->
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1><i data-lucide="scan"></i> DocScanner</h1>
+            <p class="subtitle">Web-based document scanning with perspective correction</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Sidebar for controls -->
+            <aside class="sidebar">
+                <section class="card">
+                    <h2><i data-lucide="upload"></i> Upload Image</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <input type="file" id="fileInput" accept="image/*" hidden>
+                        <label for="fileInput" class="upload-button">
+                            <i data-lucide="image"></i>
+                            <span>Choose an image</span>
+                        </label>
+                        <p class="upload-hint">Supports JPG, PNG, WEBP</p>
+                    </div>
+                    <div class="loading" id="opencvLoading">
+                        <div class="spinner"></div>
+                        <p>Loading OpenCV.js...</p>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <h2><i data-lucide="crop"></i> Crop & Adjust</h2>
+                    <p>Drag the four corner points to match document edges.</p>
+                    <div class="button-group">
+                        <button id="btnAutoDetect" class="button" disabled>
+                            <i data-lucide="scan-line"></i> Auto‑detect
+                        </button>
+                        <button id="btnResetPoints" class="button button-outline" disabled>
+                            <i data-lucide="refresh-cw"></i> Reset Points
+                        </button>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <h2><i data-lucide="settings"></i> Image Processing</h2>
+                    <div class="form-group">
+                        <label for="modeSelect">Output Mode</label>
+                        <select id="modeSelect" class="select">
+                            <option value="color">Color Original</option>
+                            <option value="grayscale">Grayscale</option>
+                            <option value="bw" selected>Black & White (Enhanced)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="dpiSelect">Export DPI</label>
+                        <select id="dpiSelect" class="select">
+                            <option value="150">150 DPI</option>
+                            <option value="300" selected>300 DPI</option>
+                            <option value="600">600 DPI</option>
+                        </select>
+                    </div>
+                    <button id="btnProcess" class="button button-primary" disabled>
+                        <i data-lucide="zap"></i> Process & Preview
+                    </button>
+                </section>
+
+                <section class="card">
+                    <h2><i data-lucide="download"></i> Export</h2>
+                    <div class="button-group vertical">
+                        <button id="btnExportPNG" class="button button-success" disabled>
+                            <i data-lucide="image"></i> Download PNG
+                        </button>
+                        <button id="btnExportJPG" class="button button-success" disabled>
+                            <i data-lucide="image"></i> Download JPG
+                        </button>
+                        <button id="btnExportPDF" class="button button-success" disabled>
+                            <i data-lucide="file-text"></i> Download PDF
+                        </button>
+                    </div>
+                </section>
+
+                <section class="card">
+                    <h2><i data-lucide="info"></i> Instructions</h2>
+                    <ol class="instructions">
+                        <li>Upload a document image (e.g., photo of a paper).</li>
+                        <li>Adjust the four corner points to match the document edges.</li>
+                        <li>Choose processing mode and click "Process & Preview".</li>
+                        <li>Download the corrected image or PDF.</li>
+                    </ol>
+                </section>
+            </aside>
+
+            <!-- Main canvas area -->
+            <main class="canvas-area">
+                <div class="canvas-container">
+                    <div class="canvas-header">
+                        <h2><i data-lucide="camera"></i> Original Image</h2>
+                        <div class="canvas-actions">
+                            <button id="btnZoomIn" class="button-icon" title="Zoom In">
+                                <i data-lucide="zoom-in"></i>
+                            </button>
+                            <button id="btnZoomOut" class="button-icon" title="Zoom Out">
+                                <i data-lucide="zoom-out"></i>
+                            </button>
+                            <button id="btnZoomReset" class="button-icon" title="Reset Zoom">
+                                <i data-lucide="refresh-cw"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="canvas-wrapper">
+                        <!-- Fabric.js canvas for interactive points -->
+                        <canvas id="fabricCanvas"></canvas>
+                        <!-- Hidden canvas for OpenCV processing -->
+                        <canvas id="cvCanvas" style="display: none;"></canvas>
+                    </div>
+                    <div class="canvas-footer">
+                        <div class="status" id="status">Ready. Upload an image to start.</div>
+                        <div class="coordinates" id="coordinates">Points: --</div>
+                    </div>
+                </div>
+
+                <div class="canvas-container">
+                    <div class="canvas-header">
+                        <h2><i data-lucide="check-circle"></i> Processed Result</h2>
+                    </div>
+                    <div class="canvas-wrapper">
+                        <!-- Result canvas -->
+                        <canvas id="resultCanvas"></canvas>
+                    </div>
+                    <div class="canvas-footer">
+                        <div class="status" id="resultStatus">Processing result will appear here.</div>
+                        <div class="coordinates">Size: <span id="resultSize">--</span></div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>DocScanner – Built with OpenCV.js & Fabric.js | 
+                <a href="https://github.com/yourusername/docscanner" target="_blank">GitHub</a> | 
+                <a href="https://opencv.org" target="_blank">OpenCV</a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Load OpenCV.js synchronously to ensure it loads before other scripts -->
+    <script>
+        // Show loading indicator
+        const opencvLoading = document.getElementById('opencvLoading');
+        
+        // Create script element
+        const script = document.createElement('script');
+        script.src = 'lib/opencv.js';
+        
+        // Load synchronously (not async)
+        script.onload = function() {
+            console.log('OpenCV.js loaded');
+            opencvLoading.style.display = 'none';
+            
+            // Now load the rest of the scripts after OpenCV is ready
+            loadAppScripts();
+        };
+        
+        script.onerror = function() {
+            opencvLoading.innerHTML = '<p style="color: #ef4444;">Failed to load OpenCV.js. Please refresh.</p>';
+            console.error('Failed to load OpenCV.js');
+        };
+        
+        document.head.appendChild(script);
+        
+        // Load application scripts after OpenCV is ready
+        function loadAppScripts() {
+            const scripts = [
+                'js/cv-engine.js',
+                'js/fabric-handler.js',
+                'js/pdf-exporter.js',
+                'js/app.js'
+            ];
+            
+            function loadScript(index) {
+                if (index >= scripts.length) {
+                    // All scripts loaded, initialize app
+                    if (typeof initApp === 'function') {
+                        initApp();
+                    }
+                    return;
+                }
+                
+                const script = document.createElement('script');
+                script.src = scripts[index];
+                script.onload = function() {
+                    console.log('Loaded:', scripts[index]);
+                    loadScript(index + 1);
+                };
+                script.onerror = function() {
+                    console.error('Failed to load:', scripts[index]);
+                    loadScript(index + 1); // Continue anyway
+                };
+                document.head.appendChild(script);
+            }
+            
+            loadScript(0);
+        }
+    </script>
+</body>
+</html>

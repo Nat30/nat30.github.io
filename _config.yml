@@ -1,0 +1,5 @@
+# Disable Jekyll processing for GitHub Pages
+include: [".well-known"]
+exclude: []
+safe: false
+plugins: []
