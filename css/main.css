@@ -123,6 +123,12 @@ body {
     background: #eff6ff;
 }
 
+.upload-area.drag-over {
+    border-color: var(--success);
+    background: #ecfdf5;
+    transform: scale(1.02);
+}
+
 .upload-button {
     display: inline-flex;
     align-items: center;

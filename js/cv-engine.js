@@ -1,317 +1,382 @@
 /**
- * cv-engine.js - OpenCV.js image processing engine for document scanning
- * Core functions: perspective correction, image enhancement, mode conversion
+ * cv-engine.js - Document scanning engine
+ * Uses jscanify for edge detection, pure JS for perspective warp & image enhancement
  */
 
 const CVEngine = (function() {
-    // Module state
-    let isOpenCVReady = false;
-    let originalMat = null;
-    let processedMat = null;
+    let isReady = false;
+    let scanner = null;
 
-    /**
-     * Initialize OpenCV.js - called when OpenCV script loads
-     */
     function init() {
-        console.log('CVEngine.init() called, checking for OpenCV...');
-        if (typeof cv === 'undefined') {
-            console.error('OpenCV.js not loaded - cv object is undefined');
+        if (typeof jscanify === 'undefined') {
             return false;
         }
-        console.log('OpenCV.js is available, cv object:', typeof cv, cv.getBuildInformation ? 'has getBuildInformation' : 'no getBuildInformation');
-        isOpenCVReady = true;
-        console.log('CVEngine initialized');
+        if (typeof cv === 'undefined') {
+            return false;
+        }
+        scanner = new jscanify();
+        isReady = true;
         return true;
     }
 
-    /**
-     * Load an image file or URL into an OpenCV Mat
-     * @param {HTMLImageElement|File|string} source - Image element, File object, or URL
-     * @returns {Promise<cv.Mat>} Resolves with the loaded Mat
-     */
     function loadImage(source) {
         return new Promise((resolve, reject) => {
-            if (!isOpenCVReady) {
-                reject(new Error('OpenCV.js not ready'));
-                return;
-            }
-
             const img = new Image();
             img.crossOrigin = 'anonymous';
 
             if (typeof source === 'string') {
                 img.src = source;
-                img.onload = handleImageLoad;
-                img.onerror = () => reject(new Error('Failed to load image from URL'));
             } else if (source instanceof File) {
                 const reader = new FileReader();
-                reader.onload = function(e) {
-                    img.src = e.target.result;
-                    img.onload = handleImageLoad;
-                    img.onerror = () => reject(new Error('Failed to load image from FileReader'));
-                };
+                reader.onload = (e) => { img.src = e.target.result; };
                 reader.onerror = () => reject(new Error('Failed to read file'));
                 reader.readAsDataURL(source);
             } else if (source instanceof HTMLImageElement) {
                 img.src = source.src;
-                img.onload = handleImageLoad;
-                img.onerror = () => reject(new Error('Failed to load image from HTMLImageElement'));
             } else {
                 reject(new Error('Unsupported image source'));
                 return;
             }
 
-            function handleImageLoad() {
-                try {
-                    // Create Mat from image
-                    const mat = cv.imread(img);
-                    // Store as original
-                    if (originalMat) originalMat.delete();
-                    originalMat = mat;
-                    resolve(mat);
-                } catch (error) {
-                    reject(error);
-                }
-            }
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error('Failed to load image'));
         });
     }
 
-    /**
-     * Calculate Euclidean distance between two points
-     */
-    function _distance(p1, p2) {
-        return Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
+    function detectCorners(imageElement) {
+        if (!scanner || typeof cv === 'undefined') return null;
+        const img = cv.imread(imageElement);
+        const contour = scanner.findPaperContour(img);
+        if (!contour) {
+            img.delete();
+            return null;
+        }
+        const corners = scanner.getCornerPoints(contour);
+        img.delete();
+        if (!corners.topLeftCorner || !corners.topRightCorner ||
+            !corners.bottomLeftCorner || !corners.bottomRightCorner) {
+            return null;
+        }
+        return [
+            corners.topLeftCorner,
+            corners.topRightCorner,
+            corners.bottomRightCorner,
+            corners.bottomLeftCorner
+        ];
     }
 
-    /**
-     * Compute width and height of destination rectangle from four points.
-     * Uses max of opposite side lengths.
-     * @param {Array<{x:number, y:number}>} pts - Four corner points [top-left, top-right, bottom-right, bottom-left]
-     * @returns {{width: number, height: number}}
-     */
+    function _distance(p1, p2) {
+        return Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
+    }
+
     function computeDestinationSize(pts) {
         if (pts.length !== 4) throw new Error('Exactly four points required');
-
-        // Compute width as max of top and bottom edge lengths
         const widthTop = _distance(pts[0], pts[1]);
         const widthBottom = _distance(pts[3], pts[2]);
-        const width = Math.max(widthTop, widthBottom);
-
-        // Compute height as max of left and right edge lengths
         const heightLeft = _distance(pts[0], pts[3]);
         const heightRight = _distance(pts[1], pts[2]);
-        const height = Math.max(heightLeft, heightRight);
-
-        return { width: Math.round(width), height: Math.round(height) };
+        return {
+            width: Math.round(Math.max(widthTop, widthBottom)),
+            height: Math.round(Math.max(heightLeft, heightRight))
+        };
     }
 
-    /**
-     * Apply perspective transformation to straighten document.
-     * @param {cv.Mat} srcMat - Input image matrix
-     * @param {Array<{x:number, y:number}>} srcPoints - Four corner points in source image (order: TL, TR, BR, BL)
-     * @returns {cv.Mat} Transformed matrix
-     */
-    function perspectiveCorrection(srcMat, srcPoints) {
-        if (!srcMat || srcPoints.length !== 4) {
+    function _getPerspectiveTransform(src, dst) {
+        const x0 = src[0].x, y0 = src[0].y;
+        const x1 = src[1].x, y1 = src[1].y;
+        const x2 = src[2].x, y2 = src[2].y;
+        const x3 = src[3].x, y3 = src[3].y;
+        const u0 = dst[0].x, v0 = dst[0].y;
+        const u1 = dst[1].x, v1 = dst[1].y;
+        const u2 = dst[2].x, v2 = dst[2].y;
+        const u3 = dst[3].x, v3 = dst[3].y;
+
+        const A = [
+            [x0, y0, 1, 0, 0, 0, -u0*x0, -u0*y0],
+            [0, 0, 0, x0, y0, 1, -v0*x0, -v0*y0],
+            [x1, y1, 1, 0, 0, 0, -u1*x1, -u1*y1],
+            [0, 0, 0, x1, y1, 1, -v1*x1, -v1*y1],
+            [x2, y2, 1, 0, 0, 0, -u2*x2, -u2*y2],
+            [0, 0, 0, x2, y2, 1, -v2*x2, -v2*y2],
+            [x3, y3, 1, 0, 0, 0, -u3*x3, -u3*y3],
+            [0, 0, 0, x3, y3, 1, -v3*x3, -v3*y3]
+        ];
+        const b = [u0, v0, u1, v1, u2, v2, u3, v3];
+        const h = _solveLinearSystem(A, b);
+        if (!h) return null;
+        return [
+            h[0], h[1], h[2],
+            h[3], h[4], h[5],
+            h[6], h[7], 1
+        ];
+    }
+
+    function _solveLinearSystem(A, b) {
+        const n = A.length;
+        const M = A.map((row, i) => [...row, b[i]]);
+
+        for (let col = 0; col < n; col++) {
+            let maxRow = col;
+            for (let row = col + 1; row < n; row++) {
+                if (Math.abs(M[row][col]) > Math.abs(M[maxRow][col])) maxRow = row;
+            }
+            [M[col], M[maxRow]] = [M[maxRow], M[col]];
+
+            if (Math.abs(M[col][col]) < 1e-12) return null;
+
+            for (let row = col + 1; row < n; row++) {
+                const factor = M[row][col] / M[col][col];
+                for (let j = col; j <= n; j++) {
+                    M[row][j] -= factor * M[col][j];
+                }
+            }
+        }
+
+        const x = new Array(n);
+        for (let i = n - 1; i >= 0; i--) {
+            x[i] = M[i][n];
+            for (let j = i + 1; j < n; j++) {
+                x[i] -= M[i][j] * x[j];
+            }
+            x[i] /= M[i][i];
+        }
+        return x;
+    }
+
+    function perspectiveCorrection(sourceCanvas, srcPoints) {
+        if (!sourceCanvas || srcPoints.length !== 4) {
             throw new Error('Invalid input');
         }
 
         const dstSize = computeDestinationSize(srcPoints);
         const dstPoints = [
-            { x: 0, y: 0 }, // TL
-            { x: dstSize.width - 1, y: 0 }, // TR
-            { x: dstSize.width - 1, y: dstSize.height - 1 }, // BR
-            { x: 0, y: dstSize.height - 1 }  // BL
+            { x: 0, y: 0 },
+            { x: dstSize.width - 1, y: 0 },
+            { x: dstSize.width - 1, y: dstSize.height - 1 },
+            { x: 0, y: dstSize.height - 1 }
         ];
 
-        // Convert points to OpenCV Point2f arrays
-        const srcVec = new cv.MatVector();
-        const dstVec = new cv.MatVector();
-        const srcData = cv.matFromArray(4, 1, cv.CV_32FC2, [
-            srcPoints[0].x, srcPoints[0].y,
-            srcPoints[1].x, srcPoints[1].y,
-            srcPoints[2].x, srcPoints[2].y,
-            srcPoints[3].x, srcPoints[3].y
-        ]);
-        const dstData = cv.matFromArray(4, 1, cv.CV_32FC2, [
-            dstPoints[0].x, dstPoints[0].y,
-            dstPoints[1].x, dstPoints[1].y,
-            dstPoints[2].x, dstPoints[2].y,
-            dstPoints[3].x, dstPoints[3].y
-        ]);
-        srcVec.push_back(srcData);
-        dstVec.push_back(dstData);
+        const H = _getPerspectiveTransform(dstPoints, srcPoints);
+        if (!H) throw new Error('Failed to compute perspective transform');
 
-        // Compute perspective transform matrix
-        const transformMat = cv.getPerspectiveTransform(srcData, dstData);
+        const srcCtx = sourceCanvas.getContext('2d');
+        const srcImageData = srcCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+        const srcData = srcImageData.data;
+        const srcW = sourceCanvas.width;
 
-        // Apply warp
-        const dstMat = new cv.Mat();
-        cv.warpPerspective(srcMat, dstMat, transformMat, new cv.Size(dstSize.width, dstSize.height));
+        const dstCanvas = document.createElement('canvas');
+        dstCanvas.width = dstSize.width;
+        dstCanvas.height = dstSize.height;
+        const dstCtx = dstCanvas.getContext('2d');
+        const dstImageData = dstCtx.createImageData(dstSize.width, dstSize.height);
+        const dstData = dstImageData.data;
 
-        // Cleanup
-        srcVec.delete();
-        dstVec.delete();
-        srcData.delete();
-        dstData.delete();
-        transformMat.delete();
+        for (let v = 0; v < dstSize.height; v++) {
+            for (let u = 0; u < dstSize.width; u++) {
+                const w = H[6] * u + H[7] * v + H[8];
+                const srcX = (H[0] * u + H[1] * v + H[2]) / w;
+                const srcY = (H[3] * u + H[4] * v + H[5]) / w;
 
-        return dstMat;
+                const px = Math.round(srcX);
+                const py = Math.round(srcY);
+
+                if (px >= 0 && px < srcW && py >= 0 && py < sourceCanvas.height) {
+                    const srcIdx = (py * srcW + px) * 4;
+                    const dstIdx = (v * dstSize.width + u) * 4;
+                    dstData[dstIdx] = srcData[srcIdx];
+                    dstData[dstIdx + 1] = srcData[srcIdx + 1];
+                    dstData[dstIdx + 2] = srcData[srcIdx + 2];
+                    dstData[dstIdx + 3] = srcData[srcIdx + 3];
+                }
+            }
+        }
+
+        dstCtx.putImageData(dstImageData, 0, 0);
+        return dstCanvas;
     }
 
-    /**
-     * Convert image to grayscale
-     * @param {cv.Mat} srcMat - Input matrix
-     * @returns {cv.Mat} Grayscale matrix
-     */
-    function toGrayscale(srcMat) {
-        const grayMat = new cv.Mat();
-        cv.cvtColor(srcMat, grayMat, cv.COLOR_RGBA2GRAY);
-        return grayMat;
-    }
+    function _bilinearSample(imageData, x, y, width, height) {
+        const x0 = Math.floor(x);
+        const y0 = Math.floor(y);
+        const x1 = Math.min(x0 + 1, width - 1);
+        const y1 = Math.min(y0 + 1, height - 1);
 
-    /**
-     * Apply adaptive threshold for black & white enhancement
-     * @param {cv.Mat} srcMat - Input matrix (grayscale)
-     * @param {number} blockSize - Block size for adaptive threshold (odd)
-     * @param {number} C - Constant subtracted from mean
-     * @returns {cv.Mat} Binary matrix
-     */
-    function adaptiveThreshold(srcMat, blockSize = 11, C = 2) {
-        const dstMat = new cv.Mat();
-        cv.adaptiveThreshold(
-            srcMat,
-            dstMat,
-            255, // max value
-            cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv.THRESH_BINARY,
-            blockSize,
-            C
-        );
-        return dstMat;
-    }
+        if (x0 < 0 || y0 < 0 || x0 >= width || y0 >= height) return [255, 255, 255, 255];
 
-    /**
-     * Convert image to black & white enhanced mode
-     * @param {cv.Mat} srcMat - Input matrix (color)
-     * @returns {cv.Mat} B/W enhanced matrix
-     */
-    function toBlackWhiteEnhanced(srcMat) {
-        const gray = toGrayscale(srcMat);
-        const bw = adaptiveThreshold(gray, 11, 2);
-        gray.delete();
+        const fx = x - x0;
+        const fy = y - y0;
+        const data = imageData.data;
 
-        // Convert back to 4-channel for consistent output
-        const result = new cv.Mat();
-        cv.cvtColor(bw, result, cv.COLOR_GRAY2RGBA);
-        bw.delete();
+        const i00 = (y0 * width + x0) * 4;
+        const i10 = (y0 * width + x1) * 4;
+        const i01 = (y1 * width + x0) * 4;
+        const i11 = (y1 * width + x1) * 4;
+
+        const result = [];
+        for (let c = 0; c < 4; c++) {
+            const v = data[i00 + c] * (1 - fx) * (1 - fy) +
+                      data[i10 + c] * fx * (1 - fy) +
+                      data[i01 + c] * (1 - fx) * fy +
+                      data[i11 + c] * fx * fy;
+            result.push(Math.round(v));
+        }
         return result;
     }
 
-    /**
-     * Process image with given points and mode
-     * @param {cv.Mat} srcMat - Source image matrix
-     * @param {Array<{x:number, y:number}>} points - Four corner points
-     * @param {string} mode - 'color', 'grayscale', or 'bw'
-     * @returns {cv.Mat} Processed matrix
-     */
-    function processImage(srcMat, points, mode = 'bw') {
-        if (!srcMat || !points || points.length !== 4) {
+    function perspectiveCorrectionHQ(sourceCanvas, srcPoints) {
+        if (!sourceCanvas || srcPoints.length !== 4) {
+            throw new Error('Invalid input');
+        }
+
+        const dstSize = computeDestinationSize(srcPoints);
+        const dstPoints = [
+            { x: 0, y: 0 },
+            { x: dstSize.width - 1, y: 0 },
+            { x: dstSize.width - 1, y: dstSize.height - 1 },
+            { x: 0, y: dstSize.height - 1 }
+        ];
+
+        const H = _getPerspectiveTransform(dstPoints, srcPoints);
+        if (!H) throw new Error('Failed to compute perspective transform');
+
+        const srcCtx = sourceCanvas.getContext('2d');
+        const srcImageData = srcCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+        const srcW = sourceCanvas.width;
+        const srcH = sourceCanvas.height;
+
+        const dstCanvas = document.createElement('canvas');
+        dstCanvas.width = dstSize.width;
+        dstCanvas.height = dstSize.height;
+        const dstCtx = dstCanvas.getContext('2d');
+        const dstImageData = dstCtx.createImageData(dstSize.width, dstSize.height);
+        const dstData = dstImageData.data;
+
+        for (let v = 0; v < dstSize.height; v++) {
+            for (let u = 0; u < dstSize.width; u++) {
+                const w = H[6] * u + H[7] * v + H[8];
+                const srcX = (H[0] * u + H[1] * v + H[2]) / w;
+                const srcY = (H[3] * u + H[4] * v + H[5]) / w;
+
+                const dstIdx = (v * dstSize.width + u) * 4;
+                if (srcX >= 0 && srcX < srcW && srcY >= 0 && srcY < srcH) {
+                    const [r, g, b, a] = _bilinearSample(srcImageData, srcX, srcY, srcW, srcH);
+                    dstData[dstIdx] = r;
+                    dstData[dstIdx + 1] = g;
+                    dstData[dstIdx + 2] = b;
+                    dstData[dstIdx + 3] = a;
+                }
+            }
+        }
+
+        dstCtx.putImageData(dstImageData, 0, 0);
+        return dstCanvas;
+    }
+
+    function _drawImageToCanvas(img) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        return canvas;
+    }
+
+    function _applyGrayscale(canvas) {
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            data[i] = data[i + 1] = data[i + 2] = gray;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        return canvas;
+    }
+
+    function _applyAdaptiveThreshold(canvas, blockSize, C) {
+        blockSize = blockSize || 15;
+        C = C || 10;
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const w = canvas.width;
+        const h = canvas.height;
+        const half = Math.floor(blockSize / 2);
+
+        const gray = new Float32Array(w * h);
+        for (let i = 0; i < w * h; i++) {
+            gray[i] = data[i * 4];
+        }
+
+        const integral = new Float64Array(w * h);
+        for (let y = 0; y < h; y++) {
+            let rowSum = 0;
+            for (let x = 0; x < w; x++) {
+                rowSum += gray[y * w + x];
+                integral[y * w + x] = rowSum + (y > 0 ? integral[(y - 1) * w + x] : 0);
+            }
+        }
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const x1 = Math.max(0, x - half);
+                const y1 = Math.max(0, y - half);
+                const x2 = Math.min(w - 1, x + half);
+                const y2 = Math.min(h - 1, y + half);
+
+                const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+                let sum = integral[y2 * w + x2];
+                if (x1 > 0) sum -= integral[y2 * w + (x1 - 1)];
+                if (y1 > 0) sum -= integral[(y1 - 1) * w + x2];
+                if (x1 > 0 && y1 > 0) sum += integral[(y1 - 1) * w + (x1 - 1)];
+
+                const mean = sum / count;
+                const idx = (y * w + x) * 4;
+                const val = gray[y * w + x] > mean - C ? 255 : 0;
+                data[idx] = data[idx + 1] = data[idx + 2] = val;
+            }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        return canvas;
+    }
+
+    function processImage(sourceImage, points, mode) {
+        if (!sourceImage || !points || points.length !== 4) {
             throw new Error('Invalid input for processing');
         }
 
-        // Step 1: Perspective correction
-        let processed = perspectiveCorrection(srcMat, points);
+        const srcCanvas = _drawImageToCanvas(sourceImage);
 
-        // Step 2: Apply mode-specific processing
+        let processed = perspectiveCorrectionHQ(srcCanvas, points);
+
         if (mode === 'grayscale') {
-            const gray = toGrayscale(processed);
-            processed.delete();
-            // Convert back to 4-channel for consistency
-            const gray4ch = new cv.Mat();
-            cv.cvtColor(gray, gray4ch, cv.COLOR_GRAY2RGBA);
-            gray.delete();
-            processed = gray4ch;
+            processed = _applyGrayscale(processed);
         } else if (mode === 'bw') {
-            const bw = toBlackWhiteEnhanced(processed);
-            processed.delete();
-            processed = bw;
+            processed = _applyGrayscale(processed);
+            processed = _applyAdaptiveThreshold(processed);
         }
-        // If mode === 'color', keep as is (already corrected)
-
-        // Store processed matrix
-        if (processedMat) processedMat.delete();
-        processedMat = processed;
 
         return processed;
     }
 
-    /**
-     * Convert OpenCV Mat to ImageData for canvas rendering
-     * @param {cv.Mat} mat - Matrix to convert
-     * @returns {ImageData} ImageData object
-     */
-    function matToImageData(mat) {
-        const imgData = new ImageData(mat.cols, mat.rows);
-        cv.imshow('cvCanvas', mat); // Use hidden canvas
-        const ctx = document.getElementById('cvCanvas').getContext('2d');
-        return ctx.getImageData(0, 0, mat.cols, mat.rows);
+    function drawResultToCanvas(resultCanvas, targetCanvas) {
+        if (!resultCanvas || !targetCanvas) return;
+        targetCanvas.width = resultCanvas.width;
+        targetCanvas.height = resultCanvas.height;
+        const ctx = targetCanvas.getContext('2d');
+        ctx.drawImage(resultCanvas, 0, 0);
     }
 
-    /**
-     * Draw OpenCV Mat onto a canvas element
-     * @param {cv.Mat} mat - Matrix to draw
-     * @param {HTMLCanvasElement} canvas - Target canvas
-     */
-    function drawMatToCanvas(mat, canvas) {
-        if (!mat || !canvas) return;
-        cv.imshow(canvas, mat);
-    }
-
-    /**
-     * Cleanup memory
-     */
-    function cleanup() {
-        if (originalMat) {
-            originalMat.delete();
-            originalMat = null;
-        }
-        if (processedMat) {
-            processedMat.delete();
-            processedMat = null;
-        }
-    }
-
-    /**
-     * Get current processed Mat (if any)
-     */
-    function getProcessedMat() {
-        return processedMat;
-    }
-
-    /**
-     * Get OpenCV readiness status
-     */
-    function isReady() {
-        return isOpenCVReady;
-    }
-
-    // Public API
     return {
         init,
         loadImage,
         processImage,
+        detectCorners,
         computeDestinationSize,
         perspectiveCorrection,
-        toGrayscale,
-        adaptiveThreshold,
-        toBlackWhiteEnhanced,
-        matToImageData,
-        drawMatToCanvas,
-        cleanup,
-        getProcessedMat,
-        isReady
+        perspectiveCorrectionHQ,
+        drawResultToCanvas,
+        isReady: () => isReady
     };
 })();
-
-// No auto‑initialization; init() must be called explicitly after OpenCV loads

@@ -6,12 +6,10 @@
     <title>DocScanner - Web Document Scanning & Perspective Correction</title>
     <link rel="stylesheet" href="css/main.css">
     <!-- Lucide Icons CDN -->
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <!-- Fabric.js CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
-    <!-- jsPDF CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <!-- OpenCV.js will be loaded asynchronously -->
+    <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.1/dist/umd/lucide.js" integrity="sha256-KdJk/6hIxG4JkVdIz77KUcd0ZkVHYuN9m7CE01x+JLA=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js" integrity="sha256-86N2MCAYnWm40rZBlxcmgrbZD4+Q/KxS15mwz2Sphwo=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha256-mMzxeqEMILsTAXYmGPzJtqs6Tn8mtgcdZNC0EVTfOHU=" crossorigin="anonymous"></script>
+    <!-- OpenCV.js + jscanify will be loaded asynchronously -->
 </head>
 <body>
     <div class="container">
@@ -36,7 +34,7 @@
                     </div>
                     <div class="loading" id="opencvLoading">
                         <div class="spinner"></div>
-                        <p>Loading OpenCV.js...</p>
+                        <p>Loading scan engine...</p>
                     </div>
                 </section>
 
@@ -149,8 +147,8 @@
 
         <!-- Footer -->
         <footer class="footer">
-            <p>DocScanner – Built with OpenCV.js & Fabric.js | 
-                <a href="https://github.com/yourusername/docscanner" target="_blank">GitHub</a> | 
+            <p>DocScanner – Built with OpenCV.js, jscanify & Fabric.js |
+                <a href="https://github.com/yourusername/docscanner" target="_blank">GitHub</a> |
                 <a href="https://opencv.org" target="_blank">OpenCV</a>
             </p>
         </footer>
@@ -158,62 +156,47 @@
 
     <!-- Load OpenCV.js synchronously to ensure it loads before other scripts -->
     <script>
-        // Show loading indicator
         const opencvLoading = document.getElementById('opencvLoading');
         
-        // Create script element
-        const script = document.createElement('script');
-        script.src = 'lib/opencv.js';
-        
-        // Load synchronously (not async)
-        script.onload = function() {
-            console.log('OpenCV.js loaded');
-            opencvLoading.style.display = 'none';
-            
-            // Now load the rest of the scripts after OpenCV is ready
-            loadAppScripts();
-        };
-        
-        script.onerror = function() {
-            opencvLoading.innerHTML = '<p style="color: #ef4444;">Failed to load OpenCV.js. Please refresh.</p>';
-            console.error('Failed to load OpenCV.js');
-        };
-        
-        document.head.appendChild(script);
-        
-        // Load application scripts after OpenCV is ready
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = src;
+                s.onload = resolve;
+                s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+
+        async function loadEngine() {
+            try {
+                await loadScript('lib/opencv.js');
+                await loadScript('https://cdn.jsdelivr.net/gh/puffinsoft/jscanify@1.4.0/src/jscanify.min.js');
+                opencvLoading.style.display = 'none';
+                loadAppScripts();
+            } catch (e) {
+                opencvLoading.innerHTML = '<p style="color: #ef4444;">Failed to load engine. Please refresh.</p>';
+            }
+        }
+
         function loadAppScripts() {
-            const scripts = [
-                'js/cv-engine.js',
-                'js/fabric-handler.js',
-                'js/pdf-exporter.js',
-                'js/app.js'
-            ];
-            
-            function loadScript(index) {
-                if (index >= scripts.length) {
-                    // All scripts loaded, initialize app
-                    if (typeof initApp === 'function') {
-                        initApp();
-                    }
+            const scripts = ['js/cv-engine.js', 'js/fabric-handler.js', 'js/pdf-exporter.js', 'js/app.js'];
+            let idx = 0;
+            function next() {
+                if (idx >= scripts.length) {
+                    if (typeof initApp === 'function') initApp();
                     return;
                 }
-                
-                const script = document.createElement('script');
-                script.src = scripts[index];
-                script.onload = function() {
-                    console.log('Loaded:', scripts[index]);
-                    loadScript(index + 1);
-                };
-                script.onerror = function() {
-                    console.error('Failed to load:', scripts[index]);
-                    loadScript(index + 1); // Continue anyway
-                };
-                document.head.appendChild(script);
+                const s = document.createElement('script');
+                s.src = scripts[idx++];
+                s.onload = next;
+                s.onerror = next;
+                document.head.appendChild(s);
             }
-            
-            loadScript(0);
+            next();
         }
+
+        loadEngine();
     </script>
 </body>
 </html>

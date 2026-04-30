@@ -3,12 +3,15 @@
  * Coordinates UI, FabricHandler, CVEngine, and PDFExporter
  */
 
-const App = (function() {
+    const MAX_CANVAS_DIM = 2000;
+
+    const App = (function() {
     // State
     let state = {
         imageLoaded: false,
         opencvReady: false,
         processing: false,
+        resultReady: false,
         currentImage: null,
         currentPoints: null,
         currentMode: 'bw',
@@ -34,17 +37,10 @@ const App = (function() {
             lucide.createIcons();
         }
 
-        // Initialize OpenCV engine
-        console.log('App: Initializing OpenCV engine...');
-        const opencvInitResult = CVEngine.init();
-        console.log('App: CVEngine.init() returned:', opencvInitResult);
+        const engineInitResult = CVEngine.init();
         
-        if (opencvInitResult) {
+        if (engineInitResult) {
             state.opencvReady = true;
-            console.log('App initialized with OpenCV ready');
-        } else {
-            console.warn('OpenCV not ready yet');
-            console.warn('cv object available:', typeof cv);
         }
 
         // Initialize Fabric canvas
@@ -83,48 +79,77 @@ const App = (function() {
             // dom.fileInput.addEventListener('input', handleFileUpload); // Removed to avoid duplicate calls
         }
         if (dom.uploadArea) {
-            dom.uploadArea.addEventListener('click', () => {
+            dom.uploadArea.addEventListener('click', (e) => {
+                if (e.target.tagName === 'LABEL' || e.target.closest('label')) return;
                 if (dom.fileInput) dom.fileInput.click();
+            });
+
+            dom.uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dom.uploadArea.classList.add('drag-over');
+            });
+            dom.uploadArea.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dom.uploadArea.classList.remove('drag-over');
+            });
+            dom.uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dom.uploadArea.classList.remove('drag-over');
+                const file = e.dataTransfer?.files?.[0];
+                if (file && file.type.startsWith('image/')) {
+                    loadFile(file);
+                }
             });
         }
 
+        document.addEventListener('paste', (e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (file) loadFile(file);
+                    break;
+                }
+            }
+        });
+
         // Control buttons
-        dom.btnAutoDetect.addEventListener('click', handleAutoDetect);
-        dom.btnResetPoints.addEventListener('click', handleResetPoints);
-        dom.btnProcess.addEventListener('click', handleProcess);
+        dom.btnAutoDetect?.addEventListener('click', handleAutoDetect);
+        dom.btnResetPoints?.addEventListener('click', handleResetPoints);
+        dom.btnProcess?.addEventListener('click', handleProcess);
 
-        // Export buttons
-        dom.btnExportPNG.addEventListener('click', () => handleExport('png'));
-        dom.btnExportJPG.addEventListener('click', () => handleExport('jpg'));
-        dom.btnExportPDF.addEventListener('click', () => handleExport('pdf'));
+        dom.btnExportPNG?.addEventListener('click', () => handleExport('png'));
+        dom.btnExportJPG?.addEventListener('click', () => handleExport('jpg'));
+        dom.btnExportPDF?.addEventListener('click', () => handleExport('pdf'));
 
-        // Settings changes
-        dom.modeSelect.addEventListener('change', (e) => {
+        dom.modeSelect?.addEventListener('change', (e) => {
             state.currentMode = e.target.value;
         });
-        dom.dpiSelect.addEventListener('change', (e) => {
+        dom.dpiSelect?.addEventListener('change', (e) => {
             state.currentDPI = parseInt(e.target.value);
         });
 
-        // Zoom controls
-        dom.btnZoomIn.addEventListener('click', () => zoomCanvas(1.2));
-        dom.btnZoomOut.addEventListener('click', () => zoomCanvas(0.8));
-        dom.btnZoomReset.addEventListener('click', () => zoomCanvas(1.0, true));
+        dom.btnZoomIn?.addEventListener('click', () => zoomCanvas(1.2));
+        dom.btnZoomOut?.addEventListener('click', () => zoomCanvas(0.8));
+        dom.btnZoomReset?.addEventListener('click', () => zoomCanvas(1.0, true));
     }
 
     /**
      * Update UI based on state
      */
     function updateUI() {
-        const { imageLoaded, opencvReady, processing } = state;
+        const { imageLoaded, opencvReady, processing, resultReady } = state;
 
-        // Enable/disable buttons
         dom.btnAutoDetect.disabled = !imageLoaded || !opencvReady || processing;
         dom.btnResetPoints.disabled = !imageLoaded || processing;
         dom.btnProcess.disabled = !imageLoaded || !opencvReady || processing;
-        dom.btnExportPNG.disabled = !imageLoaded || processing;
-        dom.btnExportJPG.disabled = !imageLoaded || processing;
-        dom.btnExportPDF.disabled = !imageLoaded || processing;
+        dom.btnExportPNG.disabled = !resultReady || processing;
+        dom.btnExportJPG.disabled = !resultReady || processing;
+        dom.btnExportPDF.disabled = !resultReady || processing;
 
         // Show/hide OpenCV loading
         dom.opencvLoading.style.display = opencvReady ? 'none' : 'flex';
@@ -145,70 +170,66 @@ const App = (function() {
     async function handleFileUpload(e) {
         const file = e.target.files[0];
         if (!file) return;
+        await loadFile(file);
+        e.target.value = '';
+    }
 
+    async function loadFile(file) {
         setStatus('Loading image...');
         state.imageLoaded = false;
+        state.resultReady = false;
         updateUI();
 
         try {
-            // Load image into Fabric canvas
             const img = await loadImageFile(file);
             state.currentImage = img;
-            console.log('Image loaded:', img.width, 'x', img.height);
 
-            // Get image dimensions
             const width = img.naturalWidth;
             const height = img.naturalHeight;
-            console.log('Image dimensions:', width, 'x', height);
             
             if (width === 0 || height === 0) {
                 throw new Error('Invalid image dimensions');
             }
-            
-            // Set Fabric canvas size to actual image dimensions
-            FabricHandler.setCanvasSize(width, height);
+
+            let canvasWidth = width;
+            let canvasHeight = height;
+            if (Math.max(width, height) > MAX_CANVAS_DIM) {
+                const scale = MAX_CANVAS_DIM / Math.max(width, height);
+                canvasWidth = Math.round(width * scale);
+                canvasHeight = Math.round(height * scale);
+            }
+            state.imageScale = canvasWidth / width;
+
+            FabricHandler.setCanvasSize(canvasWidth, canvasHeight);
             FabricHandler.setPointsVisibility(true);
 
-            // Draw image onto Fabric canvas background (no scaling, use actual size)
             const fabricCanvas = FabricHandler.getCanvas();
-            console.log('Fabric canvas:', fabricCanvas.width, 'x', fabricCanvas.height);
-            console.log('Image src length:', img.src.length, 'dimensions:', img.naturalWidth, 'x', img.naturalHeight);
-            
-            // Clear previous background if any
+
             fabricCanvas.setBackgroundImage(null, fabricCanvas.renderAll.bind(fabricCanvas));
-            
-            // Set new background image with actual dimensions
-            console.log('Setting background image...');
+
             fabricCanvas.setBackgroundImage(img.src, fabricCanvas.renderAll.bind(fabricCanvas), {
                 originX: 'left',
                 originY: 'top',
-                scaleX: 1,
-                scaleY: 1
+                scaleX: state.imageScale,
+                scaleY: state.imageScale
             });
-            console.log('Background image set');
 
-            // Reset points to default corners (using actual dimensions)
-            FabricHandler.resetPoints(width, height);
+            FabricHandler.resetPoints(canvasWidth, canvasHeight);
 
-            // Update state
             state.imageLoaded = true;
-            // Store scaling factor for coordinate conversion (no scaling now)
-            state.imageScale = 1;
             state.originalImageWidth = width;
             state.originalImageHeight = height;
-            state.currentPoints = FabricHandler.getPoints(true); // normalized
-            setStatus('Image loaded. Adjust corner points or click Auto‑detect.');
+            state.currentPoints = FabricHandler.getPoints(true);
+            const scalePercent = Math.round(state.imageScale * 100);
+            setStatus(`Image loaded (${scalePercent}% scale). Adjust corner points or click Auto-detect.`);
             updateCoordinates();
             
-            // Force render
             fabricCanvas.renderAll();
         } catch (error) {
             setStatus('Failed to load image: ' + error.message, true);
             console.error(error);
         } finally {
             updateUI();
-            // Reset file input to allow selecting same file again
-            e.target.value = '';
         }
     }
 
@@ -254,7 +275,7 @@ const App = (function() {
             FabricHandler.setPoints(canvasNormalizedPoints, true);
             setStatus('Corners detected. Adjust if needed.');
         } catch (error) {
-            setStatus('Auto‑detection failed: ' + error.message, true);
+            setStatus('Auto-detection failed: ' + error.message, true);
             console.error(error);
         } finally {
             state.processing = false;
@@ -267,10 +288,9 @@ const App = (function() {
      */
     function handleResetPoints() {
         if (!state.currentImage) return;
-        // Use scaled dimensions for resetting points
-        const width = state.originalImageWidth * state.imageScale;
-        const height = state.originalImageHeight * state.imageScale;
-        FabricHandler.resetPoints(width, height);
+        const canvasWidth = state.originalImageWidth * state.imageScale;
+        const canvasHeight = state.originalImageHeight * state.imageScale;
+        FabricHandler.resetPoints(canvasWidth, canvasHeight);
         setStatus('Points reset to default corners.');
     }
 
@@ -320,29 +340,20 @@ const App = (function() {
         updateUI();
 
         try {
-            // Convert image to OpenCV Mat
-            const mat = await CVEngine.loadImage(state.currentImage);
-
-            // Convert canvas coordinates to original image coordinates
             const originalImagePoints = canvasToOriginalImage(state.currentPoints);
-            console.log('Processing with points:', state.currentPoints, '->', originalImagePoints);
 
-            // Process with current points and mode
-            const processedMat = CVEngine.processImage(
-                mat,
+            const resultCanvas = CVEngine.processImage(
+                state.currentImage,
                 originalImagePoints,
                 state.currentMode
             );
 
-            // Draw result onto result canvas
-            CVEngine.drawMatToCanvas(processedMat, dom.resultCanvas);
+            CVEngine.drawResultToCanvas(resultCanvas, dom.resultCanvas);
 
-            // Update result info
-            const width = processedMat.cols;
-            const height = processedMat.rows;
-            dom.resultSize.textContent = `${width}×${height} px`;
+            dom.resultSize.textContent = `${resultCanvas.width}×${resultCanvas.height} px`;
             dom.resultStatus.textContent = 'Processing complete.';
 
+            state.resultReady = true;
             setStatus('Processing complete.');
         } catch (error) {
             setStatus('Processing failed: ' + error.message, true);
