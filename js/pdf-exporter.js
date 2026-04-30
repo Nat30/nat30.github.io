@@ -54,20 +54,21 @@ const PDFExporter = (function() {
      * @param {string} filename - Optional filename
      * @param {number} dpi - DPI scaling (affects canvas size)
      */
+    function createScaledCanvas(canvas, dpi, smoothing = false) {
+        const scale = dpi / 96;
+        const scaledCanvas = document.createElement('canvas');
+        scaledCanvas.width = canvas.width * scale;
+        scaledCanvas.height = canvas.height * scale;
+        const ctx = scaledCanvas.getContext('2d');
+        ctx.imageSmoothingEnabled = smoothing;
+        if (smoothing) ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(canvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
+        return scaledCanvas;
+    }
+
     async function exportPNG(canvas, filename = 'document.png', dpi = 300) {
         if (!canvas) throw new Error('Canvas is required');
-
-        // Scale canvas for DPI
-        const originalWidth = canvas.width;
-        const originalHeight = canvas.height;
-        const scale = dpi / 96; // assuming 96 DPI screen
-        const scaledCanvas = document.createElement('canvas');
-        scaledCanvas.width = originalWidth * scale;
-        scaledCanvas.height = originalHeight * scale;
-        const ctx = scaledCanvas.getContext('2d');
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(canvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
-
+        const scaledCanvas = createScaledCanvas(canvas, dpi, false);
         const blob = await canvasToBlob(scaledCanvas, 'image/png');
         downloadBlob(blob, filename);
     }
@@ -81,19 +82,7 @@ const PDFExporter = (function() {
      */
     async function exportJPEG(canvas, filename = 'document.jpg', dpi = 300, quality = 0.95) {
         if (!canvas) throw new Error('Canvas is required');
-
-        // Scale canvas for DPI
-        const originalWidth = canvas.width;
-        const originalHeight = canvas.height;
-        const scale = dpi / 96;
-        const scaledCanvas = document.createElement('canvas');
-        scaledCanvas.width = originalWidth * scale;
-        scaledCanvas.height = originalHeight * scale;
-        const ctx = scaledCanvas.getContext('2d');
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.drawImage(canvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
-
+        const scaledCanvas = createScaledCanvas(canvas, dpi, true);
         const blob = await canvasToBlob(scaledCanvas, 'image/jpeg', quality);
         downloadBlob(blob, filename);
     }
@@ -108,19 +97,16 @@ const PDFExporter = (function() {
         if (!canvas) throw new Error('Canvas is required');
         if (!ensureJsPDF()) throw new Error('jsPDF not available');
 
-        // Convert canvas to image data URL
         const imageData = canvas.toDataURL('image/jpeg', 0.95);
-        const pdf = new jsPDF({
-            orientation: canvas.width > canvas.height ? 'landscape' : 'portrait',
-            unit: 'mm',
-            format: [canvas.width * 0.2646, canvas.height * 0.2646] // px to mm (96 DPI)
-        });
-
-        // Calculate dimensions in mm (considering DPI)
         const mmWidth = (canvas.width / dpi) * 25.4;
         const mmHeight = (canvas.height / dpi) * 25.4;
 
-        // Add page with image
+        const pdf = new jsPDF({
+            orientation: mmWidth > mmHeight ? 'landscape' : 'portrait',
+            unit: 'mm',
+            format: [mmWidth, mmHeight]
+        });
+
         pdf.addImage(imageData, 'JPEG', 0, 0, mmWidth, mmHeight);
         pdf.save(filename);
     }
